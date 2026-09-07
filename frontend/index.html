@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vehicle Damage Assessment & Insurance Surveyor Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/portal/css/style.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Top Navigation Bar -->
+    <header class="app-header">
+      <div class="brand-section">
+        <div class="brand-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 16H9m10 0h3v-3.15a1 1 0 0 0-.84-.99L16 11l-2.7-3.6a1 1 0 0 0-.8-.4H5.24a2 2 0 0 0-1.8 1.1l-.8 1.63A6 6 0 0 0 2 12.42V16h2"/>
+            <circle cx="6.5" cy="16.5" r="2.5"/>
+            <circle cx="16.5" cy="16.5" r="2.5"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">AutoClaim AI <span class="badge-phase">Phase 5: Vision + KG + Groq LLM</span></h1>
+          <p class="brand-subtitle">Hybrid Explainable AI Framework for Intelligent Vehicle Damage Assessment & Survey Reporting</p>
+        </div>
+      </div>
+      <div class="header-status">
+        <div class="status-pill online" id="systemStatusPill">
+          <span class="status-dot"></span>
+          <span id="systemStatusText">YOLO + SAM2 + Depth + KG + Groq Ready</span>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="btnRefreshHealth" title="Check API Health">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+          </svg>
+          Health Check
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="main-container">
+      <!-- Left / Top Column: Claim Form & Upload Zone -->
+      <section class="claim-intake-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <span class="step-badge">1</span>
+            <h2>Surveyor Intake & Multi-View Photo Upload</h2>
+          </div>
+          <button type="button" class="btn-text" id="btnLoadSamples">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+            </svg>
+            Load Sample Repo Images
+          </button>
+        </div>
+
+        <form id="inspectionForm" class="intake-form">
+          <div class="form-grid-3">
+            <div class="form-group">
+              <label for="claimIdInput">Claim / Session ID <span class="required">*</span></label>
+              <div class="input-with-action">
+                <input type="text" id="claimIdInput" name="claim_id" required placeholder="e.g. CLM-2026-8801">
+                <button type="button" class="btn btn-secondary btn-sm" id="btnGenClaimId" title="Generate New ID">Generate</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="regNumberInput">Vehicle Registration No.</label>
+              <input type="text" id="regNumberInput" name="vehicle_reg_number" placeholder="e.g. DL 03 CC 4921">
+            </div>
+
+            <div class="form-group">
+              <label for="confThresholdInput">
+                YOLO Confidence: <strong id="confValueLabel">0.15</strong> (High Recall)
+              </label>
+              <input type="range" id="confThresholdInput" min="0.05" max="0.90" step="0.05" value="0.15">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="surveyorNotesInput">Surveyor Field Notes</label>
+            <input type="text" id="surveyorNotesInput" name="surveyor_notes" placeholder="e.g. Frontal collision with guardrail, inspect front bumper and headlamp assembly.">
+          </div>
+
+          <!-- Phase 2 Refinement: AMG on Vehicle ROI Toggle -->
+          <div class="amg-toggle-card">
+            <label class="toggle-control">
+              <input type="checkbox" id="amgToggleInput" name="enable_amg" checked>
+              <span class="toggle-slider"></span>
+              <span class="toggle-label-text">
+                <strong>SAM2 Automatic Mask Generation (AMG) on Vehicle ROI</strong>
+                <span class="badge-amg">Deep Fragment Recall</span>
+              </span>
+            </label>
+            <p class="form-hint">Densely prompts SAM2 across the detected vehicle crop to isolate unclassified fragments (e.g. broken grille pieces, exposed radiator fins, cracked brackets) not captured by standard YOLO boxes.</p>
+          </div>
+
+          <!-- Dropzone -->
+          <div class="upload-dropzone" id="uploadDropzone">
+            <input type="file" id="fileInput" multiple accept="image/jpeg,image/png,image/webp" class="file-input-hidden">
+            <div class="dropzone-content">
+              <div class="dropzone-icon">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M12 12v9M8 16l4-4 4 4"/>
+                </svg>
+              </div>
+              <p class="dropzone-text"><strong>Click to browse</strong> or drag & drop multi-view vehicle photos here</p>
+              <p class="dropzone-subtext">Supported formats: JPEG, PNG, WebP (Front, Rear, Sides, Close-ups)</p>
+            </div>
+          </div>
+
+          <!-- Uploaded Files Preview & View Tagging Queue -->
+          <div class="file-queue-section" id="fileQueueSection" style="display: none;">
+            <div class="queue-header">
+              <h3>Selected Images for Damage Inference (<span id="fileCountBadge">0</span>)</h3>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnClearFiles">Clear All</button>
+            </div>
+            <div class="file-grid" id="fileGrid"></div>
+          </div>
+
+          <!-- Submit Action -->
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary btn-lg" id="btnAnalyze" disabled>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <polygon points="10 8 16 12 10 16 10 8"/>
+              </svg>
+              Run Damage Detection Pipeline
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Step 1B: Claim Document Intake & KYC Verification (Phase 5 - Groq Vision LLM) -->
+      <section class="claim-intake-card document-intake-card" id="documentIntakeSection">
+        <div class="card-header">
+          <div class="card-title-group">
+            <span class="step-badge">1B</span>
+            <div>
+              <h2>KYC &amp; Claim Document Intake (Groq Vision OCR)</h2>
+              <span class="text-muted" style="font-size: 0.82rem;">Upload Registration Certificate (RC), Policy, or Driving Licence to extract verifiable credentials in parallel.</span>
+            </div>
+          </div>
+          <div class="doc-header-actions">
+            <span class="badge-amg" id="docCrossCheckBadge">Cross-Check: Not Run</span>
+          </div>
+        </div>
+
+        <div class="doc-tabs-container">
+          <div class="doc-tabs-nav">
+            <button type="button" class="doc-tab-btn active" data-doc-type="rc_book">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="14" x="3" y="5" rx="2"/><path d="M7 15h4M15 15h2M7 11h2M13 11h4"/></svg>
+              Registration Certificate (RC)
+            </button>
+            <button type="button" class="doc-tab-btn" data-doc-type="insurance_policy">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              Motor Insurance Policy
+            </button>
+            <button type="button" class="doc-tab-btn" data-doc-type="driving_licence">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M6 20v-2a6 6 0 0 1 12 0v2"/></svg>
+              Driving Licence
+            </button>
+          </div>
+
+          <!-- Document Upload Box -->
+          <div class="doc-tab-content active" id="docTabContent">
+            <div class="doc-upload-zone" id="docUploadZone">
+              <input type="file" id="docFileInput" accept="image/jpeg,image/png,image/webp" class="file-input-hidden">
+              <div class="doc-drop-text">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                <p>Click to browse or drag &amp; drop <strong id="currentDocLabel">Registration Certificate (RC)</strong> image here</p>
+                <small>Groq Vision LLM extracts strictly legible fields with anti-hallucination guardrails.</small>
+              </div>
+            </div>
+
+            <!-- Upload progress spinner -->
+            <div class="doc-spinner-box" id="docSpinnerBox" style="display: none;">
+              <div class="spinner-ring" style="width: 26px; height: 26px;"></div>
+              <span>Extracting fields via Groq Vision LLM...</span>
+            </div>
+
+            <!-- Extracted Fields Review & Human-in-the-Loop Override Panel -->
+            <div class="doc-fields-review" id="docFieldsReview" style="display: none;">
+              <div class="doc-review-header">
+                <div>
+                  <h4 id="docReviewTitle">Extracted Fields</h4>
+                  <span class="text-muted" id="docReviewSubtitle">Review AI-extracted values below. Edit any field to confirm corrections.</span>
+                </div>
+                <div class="doc-review-badges" id="docReviewBadges"></div>
+              </div>
+
+              <div class="table-responsive">
+                <table class="data-table doc-data-table" id="docFieldsTable">
+                  <thead>
+                    <tr>
+                      <th style="width: 25%;">Field Name</th>
+                      <th style="width: 35%;">Extracted Value (Editable)</th>
+                      <th style="width: 25%;">Source Snippet (Visual Evidence)</th>
+                      <th style="width: 15%;">Confidence &amp; Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="docFieldsTableBody"></tbody>
+                </table>
+              </div>
+
+              <div class="doc-review-actions">
+                <button type="button" class="btn btn-primary btn-sm" id="btnSaveDocOverrides">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                  Confirm &amp; Save Field Values
+                </button>
+                <span class="save-status-msg" id="docSaveStatusMsg"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- Loading / Processing State Overlay -->
+      <section class="loading-state" id="loadingState" style="display: none;">
+        <div class="spinner-ring"></div>
+        <h3>Executing Damage Detection & SAM2 Segmentation...</h3>
+        <p class="text-muted">Running YOLO11m high-recall detection, edge-aware box padding, and SAM2 Automatic Mask Generation on vehicle ROI.</p>
+      </section>
+
+      <!-- Inspection Results Section -->
+      <section class="results-container" id="resultsContainer" style="display: none;">
+        <!-- Damage Summary Dashboard Card -->
+        <div class="summary-card">
+          <div class="summary-header">
+            <div>
+              <span class="step-badge">2</span>
+              <h2>Claim Damage Assessment Summary</h2>
+              <p class="text-muted" id="claimMetaText">Claim ID: - | Assessed at: -</p>
+            </div>
+            <div class="severity-badge-container">
+              <span class="label-text">Overall Severity:</span>
+              <div class="severity-badge" id="severityBadge">Moderate</div>
+            </div>
+          </div>
+
+          <!-- Metrics KPI Row -->
+          <div class="metrics-grid" id="metricsGrid">
+            <div class="metric-card highlight">
+              <div class="metric-value" id="kpiTotalDamages">0</div>
+              <div class="metric-label">Classified Damages</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-value" id="kpiDents">0</div>
+              <div class="metric-label">Dents</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-value" id="kpiScratches">0</div>
+              <div class="metric-label">Scratches</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-value" id="kpiCracks">0</div>
+              <div class="metric-label">Cracks</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-value" id="kpiBrokenLamps">0</div>
+              <div class="metric-label">Broken Lamps</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-value" id="kpiShatteredGlass">0</div>
+              <div class="metric-label">Shattered Glass</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-value" id="kpiFlatTires">0</div>
+              <div class="metric-label">Flat Tires</div>
+            </div>
+            <div class="metric-card amg-kpi">
+              <div class="metric-value" id="kpiUnclassified">0</div>
+              <div class="metric-label">Unclassified Fragments</div>
+            </div>
+          </div>
+
+          <!-- Latency Profiling Banner -->
+          <div class="latency-banner" id="latencyBanner" style="display: none;">
+            <div class="latency-title">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+              </svg>
+              <strong>Pipeline Latency Breakdown:</strong>
+            </div>
+            <div class="latency-pills" id="latencyPills"></div>
+          </div>
+        </div>
+
+        <!-- Multi-View Image Visualizer Gallery -->
+        <div class="visualizer-card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <span class="step-badge">3</span>
+              <h2>Multi-View Annotated Visualizations</h2>
+            </div>
+            <div class="view-toggle-mode">
+              <span class="text-muted">Interactive toggle between SAM2 Masks (Classified + Unclassified), Bounding Boxes, and Original Photos</span>
+            </div>
+          </div>
+
+          <div class="inspection-gallery" id="inspectionGallery"></div>
+        </div>
+
+        <!-- Detailed Damage Items Breakdown Table -->
+        <div class="details-card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <span class="step-badge">4</span>
+              <h2>Itemized Damage Detections Table</h2>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="btnExportJson">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+              </svg>
+              Export JSON Claim Record
+            </button>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table" id="detectionsTable">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>View</th>
+                  <th>Detected Panel</th>
+                  <th>Damage / Region</th>
+                  <th>Confidence & Tier</th>
+                  <th>Damaged Area (SAM2 Mask)</th>
+                  <th>Relative Deformation</th>
+                  <th>Severity Tier</th>
+                  <th>Bounding Box [x1, y1, x2, y2]</th>
+                  <th>Dimensions (W x H)</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="detectionsTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Probabilistic Structural Risk Matrix & Explainable Reasoning Log (Phase 4) -->
+        <div class="details-card risk-matrix-card" id="structuralRiskSection">
+          <div class="card-header">
+            <div class="card-title-group">
+              <span class="step-badge">5</span>
+              <div>
+                <h2>Probabilistic Structural Risk Matrix & Explainable Reasoning Log</h2>
+                <span class="text-muted" style="font-size: 0.8rem;">Neuro-symbolic force transmission traversal from localized external panels to internal safety-critical components</span>
+              </div>
+            </div>
+            <div class="risk-matrix-header-badges">
+              <span class="badge-kg-mode" id="kgModeBadge">Neo4j Structural KG</span>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table" id="riskMatrixTable">
+              <thead>
+                <tr>
+                  <th>Component</th>
+                  <th>Zone</th>
+                  <th>Risk Score &amp; Likelihood</th>
+                  <th>Inspection Priority</th>
+                  <th>Recommended Action</th>
+                  <th>Estimated Labor</th>
+                  <th>Collision Load Path &amp; Rationale Narrative</th>
+                </tr>
+              </thead>
+              <tbody id="riskMatrixTableBody">
+                <tr>
+                  <td colspan="7" class="text-muted" style="text-align:center; padding: 24px;">
+                    Perform inspection analysis above to populate structural risk predictions.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Step 6: AI-Assisted Explainable Survey Report Dossier (Phase 5 - Groq Text LLM) -->
+        <div class="details-card report-dossier-card" id="surveyReportSection">
+          <div class="card-header">
+            <div class="card-title-group">
+              <span class="step-badge">6</span>
+              <div>
+                <h2>AI-Assisted Explainable Survey Report Dossier</h2>
+                <span class="text-muted" style="font-size: 0.8rem;">Synthesized audit-ready survey dossier (Chapter 4.6.5) fusing vision detections, SAM2 masks, Depth deformation, and KG reasoning.</span>
+              </div>
+            </div>
+            <div class="report-header-actions">
+              <span class="badge-draft-status" id="reportStatusBadge">Draft Pending Generation</span>
+              <button type="button" class="btn btn-primary btn-sm" id="btnGenerateReport">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                Generate Survey Report
+              </button>
+            </div>
+          </div>
+
+          <!-- Report Loading / Synthesizing State -->
+          <div class="report-spinner-box" id="reportSpinnerBox" style="display: none;">
+            <div class="spinner-ring" style="width: 28px; height: 28px;"></div>
+            <span>Synthesizing multi-modal facts into survey dossier via Groq LLM...</span>
+          </div>
+
+          <!-- Report View Container -->
+          <div class="report-content-container" id="reportContentContainer">
+            <div class="report-empty-placeholder" id="reportEmptyPlaceholder">
+              <p class="text-muted">Click <strong>Generate Survey Report</strong> to synthesize an audit-ready insurance survey report for this claim.</p>
+            </div>
+
+            <div class="report-active-view" id="reportActiveView" style="display: none;">
+              <!-- KPI Summary Banner -->
+              <div class="report-kpi-banner">
+                <div class="report-kpi-item">
+                  <span class="label">Assessed Verdict:</span>
+                  <strong class="value highlight-text" id="reportDisposition">Conditional Approval</strong>
+                </div>
+                <div class="report-kpi-item">
+                  <span class="label">Est. Repair Range:</span>
+                  <strong class="value" id="reportCostRange">₹28,500 - ₹42,000</strong>
+                </div>
+                <div class="report-kpi-item">
+                  <span class="label">Model Used:</span>
+                  <strong class="value mono-text" id="reportModelUsed">llama-3.3-70b-versatile</strong>
+                </div>
+                <div class="report-kpi-item">
+                  <span class="label">Synthesis Latency:</span>
+                  <strong class="value mono-text" id="reportLatency">142ms</strong>
+                </div>
+              </div>
+
+              <!-- Report Tabs: Formatted Dossier vs Structured JSON -->
+              <div class="report-tabs-nav">
+                <button type="button" class="tab-pill active" id="tabViewMarkdown">Formatted Report Dossier</button>
+                <button type="button" class="tab-pill" id="tabViewJson">Structured Audit JSON</button>
+              </div>
+
+              <!-- Markdown Rendered Container -->
+              <div class="report-markdown-body" id="reportMarkdownBody"></div>
+
+              <!-- JSON Raw Code Container -->
+              <div class="report-json-body" id="reportJsonBody" style="display: none;">
+                <pre><code id="reportJsonCode"></code></pre>
+              </div>
+
+              <!-- Surveyor Final Sign-off Footer -->
+              <div class="report-signoff-card" id="reportSignoffCard">
+                <div class="signoff-header">
+                  <h4>Surveyor Final Review &amp; Official Sign-Off</h4>
+                  <span class="badge-amg" id="signoffStatusBadge">Pending Human Signature</span>
+                </div>
+                <div class="form-group" style="margin-top: 10px;">
+                  <label for="surveyorSignoffNotes">Surveyor Final Remarks / Garage Instructions:</label>
+                  <input type="text" id="surveyorSignoffNotes" placeholder="e.g. Approved with condition that garage performs visual borescope of front frame rails before sheet metal work.">
+                </div>
+                <div class="signoff-actions">
+                  <button type="button" class="btn btn-primary" id="btnFinalizeReport">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    Finalize &amp; Sign Official Assessment
+                  </button>
+                  <button type="button" class="btn btn-secondary" id="btnExportMarkdown">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                    Export Markdown Report
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pipeline Architecture Roadmap (All 5 Modules Operational) -->
+        <div class="pipeline-stubs-card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <span class="step-badge">7</span>
+              <h2>End-to-End Pipeline Architecture (All 5 Modules Operational)</h2>
+            </div>
+            <span class="badge-stub-ready" style="background: rgba(16,185,129,0.2); color: #10B981; border: 1px solid rgba(16,185,129,0.4);">Phase 5 Complete</span>
+          </div>
+          <p class="pipeline-intro">
+            Multi-modal vision and structural reasoning synthesized into an audit-ready explainable survey dossier:
+          </p>
+
+          <div class="stubs-grid">
+            <div class="stub-box active-flow">
+              <div class="stub-header">
+                <span class="stub-tag" style="background: rgba(16,185,129,0.25); color: #10B981;">Operational</span>
+                <h4>Module 1: Document OCR</h4>
+              </div>
+              <p><code>document_ocr.py</code></p>
+              <small>Groq Vision LLM extracts verifiable KYC, RC, and policy credentials with anti-hallucination guardrails.</small>
+              <div class="stub-status" style="background: rgba(16,185,129,0.2); color: #10B981; border: 1px solid rgba(16,185,129,0.4);">Operational (Groq Vision)</div>
+            </div>
+
+            <div class="stub-box active-flow">
+              <div class="stub-header">
+                <span class="stub-tag" style="background: rgba(16,185,129,0.25); color: #10B981;">Operational</span>
+                <h4>Module 2: SAM2 Segmentation</h4>
+              </div>
+              <p><code>damage_segmentation.py</code></p>
+              <small>Converts YOLO bounding boxes into millimeter-accurate polygon masks and surface areas.</small>
+              <div class="stub-status" style="background: rgba(16,185,129,0.2); color: #10B981; border: 1px solid rgba(16,185,129,0.4);">Operational (SAM 2.1)</div>
+            </div>
+
+            <div class="stub-box active-flow">
+              <div class="stub-header">
+                <span class="stub-tag" style="background: rgba(59,130,246,0.25); color: #60A5FA;">Operational</span>
+                <h4>Module 3: Depth Anything V2</h4>
+              </div>
+              <p><code>depth_estimation.py</code></p>
+              <small>Full-scene monocular depth estimation & relative surface deformation scoring.</small>
+              <div class="stub-status" style="background: rgba(59,130,246,0.2); color: #60A5FA; border: 1px solid rgba(59,130,246,0.4);">Operational (Depth Anything V2)</div>
+            </div>
+
+            <div class="stub-box active-flow">
+              <div class="stub-header">
+                <span class="stub-tag" style="background: rgba(168,85,247,0.25); color: #C084FC;">Operational</span>
+                <h4>Module 4: Knowledge Graph</h4>
+              </div>
+              <p><code>knowledge_graph.py</code></p>
+              <small>Dual-mode Neo4j structural reasoning, force transmission decay, & explainable load paths.</small>
+              <div class="stub-status" style="background: rgba(168,85,247,0.2); color: #C084FC; border: 1px solid rgba(168,85,247,0.4);">Operational (Neo4j Structural KG)</div>
+            </div>
+
+            <div class="stub-box active-flow">
+              <div class="stub-header">
+                <span class="stub-tag" style="background: rgba(16,185,129,0.25); color: #10B981;">Operational</span>
+                <h4>Module 5: LLM Survey Report</h4>
+              </div>
+              <p><code>report_generator.py</code></p>
+              <small>Groq Text LLM synthesizes natural language survey dossier with Chapter 4.6.5 explainable reasoning.</small>
+              <div class="stub-status" style="background: rgba(16,185,129,0.2); color: #10B981; border: 1px solid rgba(16,185,129,0.4);">Operational (Groq LLM)</div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- Claim Search / Past Claims Lookup -->
+      <section class="past-claims-section">
+        <div class="card-header">
+          <h2>Stored Claims Repository</h2>
+          <button class="btn btn-secondary btn-sm" id="btnRefreshClaims">Refresh Stored Claims</button>
+        </div>
+        <div class="claims-list" id="claimsList">
+          <p class="text-muted">Loading stored claims...</p>
+        </div>
+      </section>
+    </main>
+
+    <!-- Modal for Enlarged Image Inspection -->
+    <div class="modal-backdrop" id="imageModal" style="display: none;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="modalTitle">Annotated Damage View</h3>
+          <button class="btn-close" id="btnCloseModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <img id="modalImage" src="" alt="Enlarged Inspection">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/portal/js/app.js"></script>
+</body>
+</html>
