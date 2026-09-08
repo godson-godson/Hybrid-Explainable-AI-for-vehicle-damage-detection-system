@@ -1,6 +1,6 @@
 /**
- * Surveyor Portal Frontend Application (Phase 1)
- * AutoClaim AI - Vehicle Damage Assessment
+ * AutoClaim AI — Surveyor Portal Frontend Application
+ * Vehicle Damage Assessment & Survey Intelligence
  */
 
 const API_BASE = ""; // Relative path to FastAPI backend
@@ -8,6 +8,11 @@ const API_BASE = ""; // Relative path to FastAPI backend
 // Application State
 let currentFiles = []; // Array of { file: File, view: string, previewUrl: string }
 let latestClaimResult = null;
+let currentDetectionsList = []; // Flattened list for table filtering and row drawer
+let activeDamageFilter = "all";
+let allStoredClaims = [];
+let activeClaimFilter = "all";
+let claimSearchQuery = "";
 
 // DOM Elements
 const claimIdInput = document.getElementById("claimIdInput");
@@ -15,6 +20,7 @@ const btnGenClaimId = document.getElementById("btnGenClaimId");
 const regNumberInput = document.getElementById("regNumberInput");
 const confThresholdInput = document.getElementById("confThresholdInput");
 const confValueLabel = document.getElementById("confValueLabel");
+const summaryConfVal = document.getElementById("summaryConfVal");
 const surveyorNotesInput = document.getElementById("surveyorNotesInput");
 const uploadDropzone = document.getElementById("uploadDropzone");
 const fileInput = document.getElementById("fileInput");
@@ -63,8 +69,11 @@ function generateNewClaimId() {
 function bindEvents() {
   btnGenClaimId.addEventListener("click", generateNewClaimId);
 
+  // Sync Confidence slider with badges
   confThresholdInput.addEventListener("input", (e) => {
-    confValueLabel.textContent = parseFloat(e.target.value).toFixed(2);
+    const val = parseFloat(e.target.value).toFixed(2);
+    confValueLabel.textContent = val;
+    if (summaryConfVal) summaryConfVal.textContent = val;
   });
 
   btnRefreshHealth.addEventListener("click", checkHealth);
@@ -108,11 +117,68 @@ function bindEvents() {
   document.getElementById("btnExportJson").addEventListener("click", exportClaimJson);
   document.getElementById("btnRefreshClaims").addEventListener("click", loadStoredClaims);
 
-  // Phase 5: Initialize Document Intake & Report Dossier handlers
+  // Table Filter Pills
+  const filterBtns = document.querySelectorAll("#damageFilterGroup .filter-pill");
+  filterBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      filterBtns.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      activeDamageFilter = btn.getAttribute("data-filter");
+      renderFilteredDetectionsTable();
+    });
+  });
+
+  // Review banner direct filter button
+  const btnFilterReview = document.getElementById("btnFilterReviewOnly");
+  if (btnFilterReview) {
+    btnFilterReview.addEventListener("click", () => {
+      filterBtns.forEach((b) => {
+        b.classList.toggle("active", b.getAttribute("data-filter") === "needs_review");
+      });
+      activeDamageFilter = "needs_review";
+      renderFilteredDetectionsTable();
+      document.getElementById("detectionsTable").scrollIntoView({ behavior: "smooth" });
+    });
+  }
+
+  // Stored Claims Search & Filter
+  const claimSearchInput = document.getElementById("claimSearchInput");
+  if (claimSearchInput) {
+    claimSearchInput.addEventListener("input", (e) => {
+      claimSearchQuery = e.target.value.trim().toLowerCase();
+      renderStoredClaimsList();
+    });
+  }
+
+  const claimFilterBtns = document.querySelectorAll("#claimFilterPills .claim-filter-btn");
+  claimFilterBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      claimFilterBtns.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      activeClaimFilter = btn.getAttribute("data-claim-status");
+      renderStoredClaimsList();
+    });
+  });
+
+  // Workflow Nav Smooth Scrolling & Active State
+  const navLinks = document.querySelectorAll(".nav-step-link");
+  navLinks.forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const targetId = link.getAttribute("href").substring(1);
+      const targetEl = document.getElementById(targetId);
+      if (targetEl) {
+        navLinks.forEach((l) => l.classList.remove("active"));
+        link.classList.add("active");
+        targetEl.scrollIntoView({ behavior: "smooth" });
+      }
+    });
+  });
+
+  // Document & Report handlers
   initDocumentSection();
   initReportSection();
 }
-
 
 // Health Check API
 async function checkHealth() {
@@ -121,21 +187,50 @@ async function checkHealth() {
     if (!res.ok) throw new Error("Health check failed");
     const data = await res.json();
     if (data.status === "HEALTHY") {
-      const dev = data.vision_pipeline?.damage_segmenter_sam2?.device?.toUpperCase() || "CPU";
       systemStatusPill.className = "status-pill online";
-      systemStatusText.textContent = `YOLO11m + SAM2 Ready (${dev})`;
+      systemStatusText.textContent = "System Ready";
 
-      // Update Knowledge Graph Mode Badge
+      // Populate Technical Diagnostics with accurate runtime details
+      const yoloInfo = data.vision_pipeline?.damage_detector_yolo11m;
+      const vehicleInfo = data.vision_pipeline?.vehicle_detector_yolo11n;
+      const sam2Info = data.vision_pipeline?.damage_segmenter_sam2;
+      const depthInfo = data.vision_pipeline?.depth_anything_v2;
       const kgInfo = data.vision_pipeline?.structural_knowledge_graph;
-      const kgBadge = document.getElementById("kgModeBadge");
-      if (kgBadge && kgInfo) {
-        if (kgInfo.status === "connected_live") {
-          kgBadge.textContent = `Neo4j Live (${kgInfo.nodes} nodes)`;
-          kgBadge.className = "badge-kg-mode";
+      const groqInfo = data.phase5_llm_pipeline?.groq_service;
+
+      const elYolo = document.getElementById("diagYoloStatus");
+      if (elYolo && yoloInfo) {
+        elYolo.textContent = `YOLO11m (${yoloInfo.classes_count || 6} Classes Ready)`;
+      }
+
+      const elVeh = document.getElementById("diagVehicleStatus");
+      if (elVeh && vehicleInfo) {
+        elVeh.textContent = `YOLO11n (${vehicleInfo.loaded ? "Loaded" : "Offline"})`;
+      }
+
+      const elSam2 = document.getElementById("diagSam2Status");
+      if (elSam2 && sam2Info) {
+        elSam2.textContent = `SAM2.1 Hiera Tiny (${(sam2Info.device || "CPU").toUpperCase()})`;
+      }
+
+      const elDepth = document.getElementById("diagDepthStatus");
+      if (elDepth && depthInfo) {
+        elDepth.textContent = `Depth Anything V2 (${(depthInfo.device || "CPU").toUpperCase()})`;
+      }
+
+      const elKg = document.getElementById("diagKgStatus");
+      if (elKg && kgInfo) {
+        const nodeCount = kgInfo.nodes_count !== undefined ? kgInfo.nodes_count : (kgInfo.nodes !== undefined ? kgInfo.nodes : 42);
+        if (kgInfo.neo4j_connected) {
+          elKg.textContent = `Neo4j Live (${nodeCount} Nodes)`;
         } else {
-          kgBadge.textContent = `Embedded Graph (${kgInfo.nodes} nodes)`;
-          kgBadge.className = "badge-kg-mode embedded";
+          elKg.textContent = `Embedded Store (${nodeCount} Nodes)`;
         }
+      }
+
+      const elGroq = document.getElementById("diagGroqStatus");
+      if (elGroq && groqInfo) {
+        elGroq.textContent = `${groqInfo.text_model || "Llama-3.3-70B"} + ${groqInfo.vision_model || "Vision"}`;
       }
     } else {
       systemStatusPill.className = "status-pill";
@@ -214,8 +309,11 @@ function renderFileQueue() {
     ).join("");
 
     card.innerHTML = `
+      <div class="file-card-top">
+        <span class="view-tag-label">Angle #${idx + 1}</span>
+        <button type="button" class="btn-remove-file" title="Remove Photo" onclick="removeFile(${idx})">&times;</button>
+      </div>
       <img src="${item.previewUrl}" class="file-thumb" alt="Preview">
-      <button type="button" class="btn-remove-file" title="Remove" onclick="removeFile(${idx})">&times;</button>
       <div class="file-card-body">
         <span class="file-name" title="${item.file.name}">${item.file.name}</span>
         <select class="view-select" onchange="updateViewTag(${idx}, this.value)">
@@ -241,7 +339,6 @@ async function loadSampleImages() {
     btnLoadSamples.disabled = true;
     btnLoadSamples.textContent = "Loading sample images...";
 
-    // Fetch sample files from public repo
     const sampleUrls = [
       { name: "sample_car_1.png", url: "/static/samples/1.png", view: "front" },
       { name: "sample_car_2.png", url: "/static/samples/2.png", view: "rear" },
@@ -346,7 +443,7 @@ function renderClaimResults(result) {
 
   // Severity Badge
   const badge = document.getElementById("severityBadge");
-  const sev = result.damage_summary.severity_assessment || "Moderate";
+  const sev = result.damage_summary?.severity_assessment || "Moderate";
   badge.textContent = sev;
   badge.className = "severity-badge";
   if (sev.toLowerCase().includes("minor") || sev.toLowerCase().includes("no damage")) {
@@ -357,9 +454,12 @@ function renderClaimResults(result) {
     badge.classList.add("moderate");
   }
 
-  // KPIs
-  const counts = result.damage_summary.damage_counts_by_type || {};
-  document.getElementById("kpiTotalDamages").textContent = result.damage_summary.total_damages_count || 0;
+  // Hero KPI Counts
+  const counts = result.damage_summary?.damage_counts_by_type || {};
+  const totalDamages = result.damage_summary?.total_damages_count || 0;
+  const unclassifiedCount = result.damage_summary?.unclassified_candidates_count || 0;
+
+  document.getElementById("kpiTotalDamages").textContent = totalDamages;
   document.getElementById("kpiDents").textContent = counts["dent"] || 0;
   document.getElementById("kpiScratches").textContent = counts["scratch"] || 0;
   document.getElementById("kpiCracks").textContent = counts["crack"] || 0;
@@ -369,50 +469,138 @@ function renderClaimResults(result) {
 
   const unclassifiedKpi = document.getElementById("kpiUnclassified");
   if (unclassifiedKpi) {
-    unclassifiedKpi.textContent = result.damage_summary.unclassified_candidates_count || 0;
+    unclassifiedKpi.textContent = unclassifiedCount;
   }
 
-  // Latency Profiling Display
-  const latencyBanner = document.getElementById("latencyBanner");
-  const latencyPills = document.getElementById("latencyPills");
-  if (latencyBanner && latencyPills) {
-    let totalYolo = 0, totalBoxSam2 = 0, totalCrop = 0, totalAmg = 0, totalDepth = 0, totalKg = 0, totalPipeline = 0;
-    let countWithLatency = 0;
+  // Count items needing review
+  let lowConfCount = 0;
+  currentDetectionsList = [];
 
-    result.images.forEach((img) => {
-      if (img.latency_metrics) {
-        totalYolo += img.latency_metrics.yolo_detection_ms;
-        totalBoxSam2 += img.latency_metrics.box_prompted_sam2_ms;
-        totalCrop += img.latency_metrics.vehicle_crop_ms;
-        totalAmg += img.latency_metrics.amg_sam2_ms;
-        totalDepth += (img.latency_metrics.depth_estimation_ms || 0);
-        totalKg += (img.latency_metrics.knowledge_graph_ms || 0);
-        totalPipeline += img.latency_metrics.total_pipeline_ms;
-        countWithLatency++;
-      }
+  (result.images || []).forEach((img, imgIdx) => {
+    (img.detections || []).forEach((det, dIdx) => {
+      const isLow = det.confidence_tier === "low";
+      if (isLow) lowConfCount++;
+      currentDetectionsList.push({
+        ...det,
+        image_idx: imgIdx,
+        view_angle: img.view_angle,
+        is_unclassified: false,
+        needs_review: isLow,
+        is_high_conf: !isLow,
+        det_id: `det_${imgIdx}_${dIdx}`,
+      });
     });
 
-    if (countWithLatency > 0) {
-      latencyBanner.style.display = "flex";
-      latencyPills.innerHTML = `
-        <span class="latency-pill">YOLO11m: <strong>${Math.round(totalYolo)} ms</strong></span>
-        <span class="latency-pill">Padded SAM2: <strong>${Math.round(totalBoxSam2)} ms</strong></span>
-        <span class="latency-pill">Vehicle ROI: <strong>${Math.round(totalCrop)} ms</strong></span>
-        <span class="latency-pill">SAM2 AMG: <strong>${Math.round(totalAmg)} ms</strong></span>
-        <span class="latency-pill">Depth V2: <strong>${Math.round(totalDepth)} ms</strong></span>
-        <span class="latency-pill">KG Traversal: <strong>${Math.round(totalKg)} ms</strong></span>
-        <span class="latency-pill total">Total: <strong>${(totalPipeline / 1000).toFixed(2)} s</strong></span>
-      `;
+    (img.unclassified_regions || []).forEach((unclass, uIdx) => {
+      currentDetectionsList.push({
+        ...unclass,
+        image_idx: imgIdx,
+        view_angle: img.view_angle,
+        is_unclassified: true,
+        needs_review: true,
+        is_high_conf: false,
+        det_id: `unclass_${imgIdx}_${uIdx}`,
+      });
+    });
+  });
+
+  const totalReviewItems = lowConfCount + unclassifiedCount;
+  const reviewBanner = document.getElementById("reviewAlertBanner");
+  const reviewTitle = document.getElementById("reviewAlertTitle");
+  const reviewSub = document.getElementById("reviewAlertSubtitle");
+
+  if (reviewBanner) {
+    if (totalReviewItems > 0) {
+      reviewBanner.style.display = "flex";
+      reviewTitle.textContent = `⚠ ${totalReviewItems} item${totalReviewItems === 1 ? '' : 's'} require review`;
+      reviewSub.textContent = `${lowConfCount} low-confidence detection${lowConfCount === 1 ? '' : 's'} and ${unclassifiedCount} unclassified fragment${unclassifiedCount === 1 ? '' : 's'} surfaced for surveyor scrutiny.`;
     } else {
-      latencyBanner.style.display = "none";
+      reviewBanner.style.display = "none";
     }
   }
 
-  // Gallery
+  // Update Filter Pill Counts
+  const highConfCount = currentDetectionsList.filter((d) => d.is_high_conf).length;
+  const countAllEl = document.getElementById("filterCountAll");
+  const countHighEl = document.getElementById("filterCountHigh");
+  const countRevEl = document.getElementById("filterCountReview");
+  const countUnclassEl = document.getElementById("filterCountUnclass");
+
+  if (countAllEl) countAllEl.textContent = currentDetectionsList.length;
+  if (countHighEl) countHighEl.textContent = highConfCount;
+  if (countRevEl) countRevEl.textContent = totalReviewItems;
+  if (countUnclassEl) countUnclassEl.textContent = unclassifiedCount;
+
+  // Render Table with active filter
+  renderFilteredDetectionsTable();
+
+  // Populate Latency Timings in Technical Diagnostics
+  renderLatencyBreakdown(result);
+
+  // Gallery Visual Evidence
+  renderGallery(result);
+
+  // Structural Risk Matrix
+  renderStructuralRiskMatrix(result);
+
+  // Documents and Report
+  if (result.documents) {
+    renderClaimDocuments(result.documents);
+  }
+  if (result.report) {
+    renderSurveyReport(result.report);
+  }
+}
+
+// Latency Breakdown populated in Technical Diagnostics drawer
+function renderLatencyBreakdown(result) {
+  const latencyBanner = document.getElementById("latencyBanner");
+  const latencyPills = document.getElementById("latencyPills");
+  const emptyText = document.getElementById("latencyEmptyText");
+
+  if (!latencyBanner || !latencyPills) return;
+
+  let totalYolo = 0, totalBoxSam2 = 0, totalCrop = 0, totalAmg = 0, totalDepth = 0, totalKg = 0, totalPipeline = 0;
+  let countWithLatency = 0;
+
+  (result.images || []).forEach((img) => {
+    if (img.latency_metrics) {
+      totalYolo += img.latency_metrics.yolo_detection_ms;
+      totalBoxSam2 += img.latency_metrics.box_prompted_sam2_ms;
+      totalCrop += img.latency_metrics.vehicle_crop_ms;
+      totalAmg += img.latency_metrics.amg_sam2_ms;
+      totalDepth += (img.latency_metrics.depth_estimation_ms || 0);
+      totalKg += (img.latency_metrics.knowledge_graph_ms || 0);
+      totalPipeline += img.latency_metrics.total_pipeline_ms;
+      countWithLatency++;
+    }
+  });
+
+  if (countWithLatency > 0) {
+    latencyBanner.style.display = "flex";
+    if (emptyText) emptyText.style.display = "none";
+    latencyPills.innerHTML = `
+      <span class="latency-pill">YOLO11m: <strong>${(totalYolo / 1000).toFixed(2)} s</strong></span>
+      <span class="latency-pill">Padded SAM2: <strong>${(totalBoxSam2 / 1000).toFixed(2)} s</strong></span>
+      <span class="latency-pill">Vehicle ROI: <strong>${(totalCrop / 1000).toFixed(2)} s</strong></span>
+      <span class="latency-pill">SAM2 AMG: <strong>${(totalAmg / 1000).toFixed(2)} s</strong></span>
+      <span class="latency-pill">Depth V2: <strong>${(totalDepth / 1000).toFixed(2)} s</strong></span>
+      <span class="latency-pill">Knowledge Graph: <strong>${(totalKg / 1000).toFixed(3)} s</strong></span>
+      <span class="latency-pill total">Total Pipeline: <strong>${(totalPipeline / 1000).toFixed(2)} s</strong></span>
+    `;
+  } else {
+    latencyBanner.style.display = "none";
+    if (emptyText) emptyText.style.display = "block";
+  }
+}
+
+// Gallery Visual Evidence
+function renderGallery(result) {
   const gallery = document.getElementById("inspectionGallery");
+  if (!gallery) return;
   gallery.innerHTML = "";
 
-  result.images.forEach((img, idx) => {
+  (result.images || []).forEach((img, idx) => {
     const card = document.createElement("div");
     card.className = "gallery-card";
 
@@ -421,46 +609,25 @@ function renderClaimResults(result) {
     const originalUrl = img.original_image_url;
     const depthUrl = img.depth_colormap_url;
 
-    // Classified tags with tier & deformation indicator
+    // Classified tags with tier & deformation
     const classifiedTags = (img.detections || []).map((d) => {
       const areaStr = d.segmentation ? ` | ${d.segmentation.area_percentage.toFixed(2)}%` : "";
       const isLow = (d.confidence_tier === "low");
-      const tierTag = isLow ? " [LOW]" : "";
+      const tierTag = isLow ? " [REVIEW]" : "";
       let deformTag = "";
       if (d.deformation && d.deformation.severity_tier) {
         deformTag = ` | ${d.deformation.severity_tier.toUpperCase()}`;
       }
-      return `<span class="damage-tag ${d.damage_type} ${isLow ? 'tier-low' : ''}">${d.damage_type.replace("_", " ")} (${(d.confidence * 100).toFixed(0)}%${tierTag}${areaStr}${deformTag})</span>`;
+      return `<span class="damage-tag ${d.damage_type}">${d.damage_type.replace("_", " ")} (${(d.confidence * 100).toFixed(0)}%${tierTag}${areaStr}${deformTag})</span>`;
     });
 
-    // Unclassified candidate tags (capped at top N by area descending)
-    const TOP_N_UNCLASSIFIED = 5;
+    // Unclassified candidate tags
     const rawUnclass = img.unclassified_regions || [];
-    const sortedUnclass = [...rawUnclass].sort((a, b) => {
-      const aArea = a.segmentation ? a.segmentation.area_percentage : 0;
-      const bArea = b.segmentation ? b.segmentation.area_percentage : 0;
-      return bArea - aArea;
-    });
-
-    const displayedUnclass = sortedUnclass.slice(0, TOP_N_UNCLASSIFIED);
-    const collapsedCount = sortedUnclass.length - displayedUnclass.length;
-
-    const unclassifiedTags = displayedUnclass.map((u) => {
+    const unclassifiedTags = rawUnclass.slice(0, 4).map((u) => {
       const areaStr = u.segmentation ? ` | ${u.segmentation.area_percentage.toFixed(2)}%` : "";
-      let deformTag = "";
-      if (u.deformation && u.deformation.severity_tier) {
-        deformTag = ` | ${u.deformation.severity_tier.toUpperCase()}`;
-      }
-      return `<span class="damage-tag unclassified">Unclassified Fragment${areaStr}${deformTag}</span>`;
+      return `<span class="damage-tag unclassified">Fragment${areaStr}</span>`;
     });
 
-    if (collapsedCount > 0) {
-      unclassifiedTags.push(
-        `<span class="damage-tag unclassified-collapsed" title="${collapsedCount} additional minor fragments filtered from primary display">+${collapsedCount} additional minor fragment${collapsedCount === 1 ? '' : 's'} filtered out</span>`
-      );
-    }
-
-    const allTags = [...classifiedTags, ...unclassifiedTags];
     const unclassCount = rawUnclass.length;
     const unclassBadge = unclassCount > 0 ? ` + ${unclassCount} Fragment${unclassCount === 1 ? '' : 's'}` : "";
 
@@ -485,238 +652,247 @@ function renderClaimResults(result) {
         <button type="button" class="btn-toggle-view" id="btnOrig_${idx}" onclick="switchImageView(${idx}, 'orig', '${originalUrl}')">Original</button>
       </div>
       <div class="gallery-detections-list">
-        ${allTags.length > 0 ? allTags.join("") : '<span class="text-muted" style="font-size:0.75rem;">No damages or fragments detected on this angle</span>'}
+        ${[...classifiedTags, ...unclassifiedTags].length > 0 ? [...classifiedTags, ...unclassifiedTags].join("") : '<span class="text-muted" style="font-size:0.75rem;">No damages or fragments detected on this angle</span>'}
       </div>
     `;
 
     gallery.appendChild(card);
   });
+}
 
-  // Helper function to render deformation table cells
-  function formatDeformationCells(item) {
-    const def = item.deformation;
-    if (!def) {
-      return `<td><span class="text-muted">N/A</span></td><td><span class="text-muted">-</span></td>`;
-    }
-    if (def.deformation_status === "reference_unavailable" || def.deformation_status === "reference_unreliable_edge_boundary") {
-      return `
-        <td><span class="badge-sev-unavail" title="Reference ring excluded due to adjacent damage or image borders">Ref Unavail</span></td>
-        <td><span class="text-muted">-</span></td>
-      `;
-    }
-    if (def.deformation_status === "too_small_for_reliable_severity_estimate" || def.deformation_status === "too_small") {
-      return `
-        <td><span class="badge-sev-too-small" title="Fragment area is too small for reliable 3D depth deformation estimate">Too Small</span></td>
-        <td><span class="text-muted">-</span></td>
-      `;
-    }
-    const score = def.relative_deformation_score;
-    const scoreFormatted = (score !== null && score !== undefined)
-      ? `${score >= 0 ? '+' : ''}${score.toFixed(3)}`
-      : '0.000';
-    const typeLabel = def.deformation_type || 'relative';
-    const sevTier = def.severity_tier;
-    const sevBadge = sevTier
-      ? `<span class="badge-sev-${sevTier}">${sevTier.toUpperCase()}</span>`
-      : `<span class="text-muted">-</span>`;
-    return `
-      <td>
-        <div class="deform-cell">
-          <span class="deform-val">${scoreFormatted}</span>
-          <span class="deform-sub">${typeLabel}</span>
-        </div>
-      </td>
-      <td>${sevBadge}</td>
-    `;
-  }
-
-  // Detections Table
+// Render Streamlined 7-Column Table with Expandable Details
+function renderFilteredDetectionsTable() {
   const tbody = document.getElementById("detectionsTableBody");
+  if (!tbody) return;
   tbody.innerHTML = "";
 
-  let rowCounter = 1;
-  result.images.forEach((img) => {
-    // 1. Render Classified Detections
-    (img.detections || []).forEach((det) => {
-      const tr = document.createElement("tr");
-      const confPct = (det.confidence * 100).toFixed(1);
-      const b = det.bbox;
-      const seg = det.segmentation;
-      const areaHtml = seg
-        ? `<span class="area-badge"><strong>${seg.area_percentage.toFixed(2)}%</strong> (${seg.area_pixels.toLocaleString()} px)</span>`
-        : `<span class="text-muted">N/A</span>`;
+  let filtered = currentDetectionsList;
+  if (activeDamageFilter === "high_conf") {
+    filtered = currentDetectionsList.filter((d) => d.is_high_conf);
+  } else if (activeDamageFilter === "needs_review") {
+    filtered = currentDetectionsList.filter((d) => d.needs_review);
+  } else if (activeDamageFilter === "unclassified") {
+    filtered = currentDetectionsList.filter((d) => d.is_unclassified);
+  }
 
-      const tierBadge = det.confidence_tier === "low"
-        ? `<span class="badge-tier low">LOW (REVIEW)</span>`
-        : `<span class="badge-tier high">HIGH</span>`;
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-muted" style="text-align:center; padding: 24px;">No damage items match the active filter.</td></tr>`;
+    return;
+  }
 
-      const deformCells = formatDeformationCells(det);
-      const panelName = det.detected_panel ? det.detected_panel.replace(/_/g, " ").toUpperCase() : "UNKNOWN";
-      const panelBadge = `<span class="detected-panel-badge">${panelName}</span>`;
+  filtered.forEach((det, idx) => {
+    const tr = document.createElement("tr");
+    tr.className = "clickable-row";
+    tr.title = "Click to view full bounding box coordinates, dimensions, and depth deformation";
 
-      tr.innerHTML = `
-        <td><strong>#${rowCounter++}</strong></td>
-        <td><span class="view-badge">${img.view_angle}</span></td>
-        <td>${panelBadge}</td>
-        <td><span class="damage-tag ${det.damage_type}">${det.damage_type.replace("_", " ").toUpperCase()}</span></td>
-        <td>
-          <div class="confidence-bar-container">
-            <div class="confidence-bar-bg">
-              <div class="confidence-bar-fill" style="width: ${confPct}%"></div>
-            </div>
-            <strong>${confPct}%</strong>
-            ${tierBadge}
-          </div>
-        </td>
-        <td>${areaHtml}</td>
-        ${deformCells}
-        <td class="coord-cell">[${b.x1}, ${b.y1}, ${b.x2}, ${b.y2}]</td>
-        <td class="coord-cell">${b.width} × ${b.height} px</td>
-        <td><span class="badge-segmented-ready">SAM2 Segmented</span></td>
-      `;
+    const isUnclass = det.is_unclassified;
+    const confPct = (det.confidence * 100).toFixed(1);
+    const b = det.bbox;
+    const seg = det.segmentation;
+    const def = det.deformation;
 
-      tbody.appendChild(tr);
-    });
+    const areaHtml = seg
+      ? `<span class="area-badge">${seg.area_percentage.toFixed(2)}%</span>`
+      : `<span class="text-muted">N/A</span>`;
 
-    // 2. Render Unclassified Candidate Regions (AMG) - Top N by area descending
-    const rawUnclassTable = img.unclassified_regions || [];
-    const sortedUnclassTable = [...rawUnclassTable].sort((a, b) => {
-      const aArea = a.segmentation ? a.segmentation.area_percentage : 0;
-      const bArea = b.segmentation ? b.segmentation.area_percentage : 0;
-      return bArea - aArea;
-    });
+    const tierBadge = isUnclass
+      ? `<span class="badge-tier low">REVIEW</span>`
+      : det.confidence_tier === "low"
+      ? `<span class="badge-tier low">REVIEW</span>`
+      : `<span class="badge-tier high">HIGH</span>`;
 
-    const TOP_N_TABLE = 5;
-    const displayedUnclassTable = sortedUnclassTable.slice(0, TOP_N_TABLE);
-    const collapsedCountTable = sortedUnclassTable.length - displayedUnclassTable.length;
+    const statusBadge = isUnclass
+      ? `<span class="badge-unclass-status">Needs Review</span>`
+      : `<span class="badge-segmented-ready">Segmented</span>`;
 
-    displayedUnclassTable.forEach((unclass) => {
-      const tr = document.createElement("tr");
-      tr.style.backgroundColor = "rgba(100, 116, 139, 0.05)";
-      const confPct = (unclass.confidence * 100).toFixed(1);
-      const b = unclass.bbox;
-      const seg = unclass.segmentation;
-      const areaHtml = seg
-        ? `<span class="area-badge"><strong>${seg.area_percentage.toFixed(2)}%</strong> (${seg.area_pixels.toLocaleString()} px)</span>`
-        : `<span class="text-muted">N/A</span>`;
+    const panelName = isUnclass
+      ? "Needs Review"
+      : det.detected_panel
+      ? det.detected_panel.replace(/_/g, " ").toUpperCase()
+      : "UNKNOWN";
 
-      const deformCells = formatDeformationCells(unclass);
-      const panelBadge = `<span class="detected-panel-badge fallback">Needs Review</span>`;
+    const panelBadge = isUnclass
+      ? `<span class="detected-panel-badge fallback">${panelName}</span>`
+      : `<span class="detected-panel-badge">${panelName}</span>`;
 
-      tr.innerHTML = `
-        <td><strong>#${rowCounter++}</strong></td>
-        <td><span class="view-badge">${img.view_angle}</span></td>
-        <td>${panelBadge}</td>
-        <td><span class="damage-tag unclassified">UNCLASSIFIED</span></td>
-        <td>
-          <div class="confidence-bar-container">
-            <div class="confidence-bar-bg">
-              <div class="confidence-bar-fill" style="width: ${confPct}%; background: #94A3B8;"></div>
-            </div>
-            <strong>${confPct}%</strong>
-            <span class="badge-tier low">REVIEW</span>
-          </div>
-        </td>
-        <td>${areaHtml}</td>
-        ${deformCells}
-        <td class="coord-cell">[${b.x1}, ${b.y1}, ${b.x2}, ${b.y2}]</td>
-        <td class="coord-cell">${b.width} × ${b.height} px</td>
-        <td><span class="badge-unclass-status">Needs Review (AMG)</span></td>
-      `;
+    const damageBadge = isUnclass
+      ? `<span class="damage-tag unclassified">UNCLASSIFIED</span>`
+      : `<span class="damage-tag ${det.damage_type}">${det.damage_type.replace(/_/g, " ").toUpperCase()}</span>`;
 
-      tbody.appendChild(tr);
-    });
-
-    if (collapsedCountTable > 0) {
-      const trSummary = document.createElement("tr");
-      trSummary.className = "unclass-collapsed-row";
-      trSummary.innerHTML = `
-        <td colspan="11">
-          <div class="unclass-collapsed-wrapper">
-            <span class="badge-unclass-collapsed">+${collapsedCountTable} additional minor fragment${collapsedCountTable === 1 ? '' : 's'} filtered out</span>
-            <span class="unclass-collapsed-desc text-muted">Filtered from primary list (below top ${TOP_N_TABLE} largest fragments).</span>
-          </div>
-        </td>
-      `;
-      tbody.appendChild(trSummary);
+    // Severity pill
+    let sevBadge = `<span class="text-muted">-</span>`;
+    if (def && def.severity_tier) {
+      const sevTier = def.severity_tier.toLowerCase();
+      sevBadge = `<span class="badge-risk ${sevTier}">${sevTier.toUpperCase()}</span>`;
     }
+
+    tr.innerHTML = `
+      <td><span class="view-badge">${det.view_angle}</span></td>
+      <td>${panelBadge}</td>
+      <td>${damageBadge}</td>
+      <td>
+        <div class="confidence-bar-container">
+          <div class="confidence-bar-bg">
+            <div class="confidence-bar-fill" style="width: ${confPct}%; background: ${isUnclass ? '#94A3B8' : '#10B981'};"></div>
+          </div>
+          <strong>${confPct}%</strong>
+          ${tierBadge}
+        </div>
+      </td>
+      <td>${areaHtml}</td>
+      <td>${sevBadge}</td>
+      <td>
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          ${statusBadge}
+          <span style="font-size: 0.72rem; color: var(--color-accent); font-weight:600; margin-left:6px;">Details ▾</span>
+        </div>
+      </td>
+    `;
+
+    // Click row toggles drawer
+    tr.addEventListener("click", () => toggleRowDrawer(det.det_id));
+
+    // Drawer TR
+    const drawerTr = document.createElement("tr");
+    drawerTr.className = "row-drawer-tr";
+    drawerTr.id = `drawer_${det.det_id}`;
+    drawerTr.style.display = "none";
+
+    const scoreFormatted = (def && def.relative_deformation_score !== null && def.relative_deformation_score !== undefined)
+      ? `${def.relative_deformation_score >= 0 ? '+' : ''}${def.relative_deformation_score.toFixed(3)}`
+      : 'N/A';
+
+    const defType = def?.deformation_type || 'N/A';
+    const defStatus = def?.deformation_status ? def.deformation_status.replace(/_/g, ' ') : 'N/A';
+    const pixelArea = seg ? `${seg.area_pixels.toLocaleString()} px` : 'N/A';
+    const dimensions = b ? `${b.width} × ${b.height} px` : 'N/A';
+    const coords = b ? `[${b.x1}, ${b.y1}, ${b.x2}, ${b.y2}]` : 'N/A';
+    const depthStd = def?.depth_std ? def.depth_std.toFixed(4) : 'N/A';
+
+    drawerTr.innerHTML = `
+      <td colspan="7">
+        <div class="row-drawer-content">
+          <div class="drawer-metric">
+            <span class="drawer-label">Bounding Box Coordinates:</span>
+            <span class="drawer-value">${coords}</span>
+          </div>
+          <div class="drawer-metric">
+            <span class="drawer-label">Box Dimensions:</span>
+            <span class="drawer-value">${dimensions}</span>
+          </div>
+          <div class="drawer-metric">
+            <span class="drawer-label">SAM2 Mask Area:</span>
+            <span class="drawer-value">${pixelArea} (${seg ? seg.area_percentage.toFixed(2) + '%' : 'N/A'})</span>
+          </div>
+          <div class="drawer-metric">
+            <span class="drawer-label">Relative Deformation:</span>
+            <span class="drawer-value">${scoreFormatted} (${defType})</span>
+          </div>
+          <div class="drawer-metric">
+            <span class="drawer-label">Surface Irregularity (Depth Std):</span>
+            <span class="drawer-value">${depthStd}</span>
+          </div>
+          <div class="drawer-metric">
+            <span class="drawer-label">Deformation Status:</span>
+            <span class="drawer-value">${defStatus}</span>
+          </div>
+          <div class="drawer-metric">
+            <span class="drawer-label">Confidence Tier:</span>
+            <span class="drawer-value">${det.confidence_tier ? det.confidence_tier.toUpperCase() : 'N/A'}</span>
+          </div>
+          <div class="drawer-metric">
+            <span class="drawer-label">Source Perspective:</span>
+            <span class="drawer-value">${det.view_angle} view</span>
+          </div>
+        </div>
+      </td>
+    `;
+
+    tbody.appendChild(tr);
+    tbody.appendChild(drawerTr);
   });
+}
 
-  if (rowCounter === 1) {
-    tbody.innerHTML = `<tr><td colspan="11" class="text-muted" style="text-align:center; padding: 20px;">No damage detections or fragments registered for this claim.</td></tr>`;
-  }
-
-  // 3. Render Probabilistic Structural Risk Matrix (Phase 4)
-  const riskTbody = document.getElementById("riskMatrixTableBody");
-  if (riskTbody) {
-    riskTbody.innerHTML = "";
-    const matrix = result.structural_risk_matrix || [];
-    if (matrix.length === 0) {
-      riskTbody.innerHTML = `<tr><td colspan="7" class="text-muted" style="text-align:center; padding: 24px;">No internal structural component risks flagged for this claim.</td></tr>`;
-    } else {
-      matrix.forEach((rec) => {
-        const tr = document.createElement("tr");
-        const compName = rec.component_name ? rec.component_name.replace(/_/g, " ").toUpperCase() : "UNKNOWN";
-        const zone = rec.impact_zone || "VEHICLE";
-        const riskPct = Math.round((rec.risk_score || 0) * 100);
-        const tierClass = (rec.priority_tier || "low").toLowerCase();
-        const meterFillClass = riskPct >= 70 ? "risk-high" : riskPct >= 40 ? "risk-med" : "risk-low";
-
-        const pathChips = (rec.load_path || []).map((step, sIdx, arr) => {
-          const isSource = sIdx === 0;
-          const isTarget = sIdx === arr.length - 1;
-          const stepClass = isSource ? 'source' : isTarget ? 'target' : '';
-          const nameClean = step.replace(/_/g, ' ');
-          const arrow = sIdx < arr.length - 1 ? '<span class="load-path-arrow">➔</span>' : '';
-          return `<span class="load-path-step ${stepClass}">${nameClean}</span>${arrow}`;
-        }).join(" ");
-
-        tr.innerHTML = `
-          <td>
-            <strong>${compName}</strong>
-          </td>
-          <td>
-            <span class="risk-zone-badge">${zone}</span>
-          </td>
-          <td>
-            <div class="risk-meter-wrapper">
-              <div class="risk-meter-header">
-                <span class="risk-score-val">${riskPct}%</span>
-                <span class="text-muted" style="font-size:0.7rem;">(${(rec.risk_score || 0).toFixed(3)})</span>
-              </div>
-              <div class="risk-meter-bg">
-                <div class="risk-meter-fill ${meterFillClass}" style="width: ${riskPct}%"></div>
-              </div>
-            </div>
-          </td>
-          <td>
-            <span class="badge-risk ${tierClass}">${(rec.priority_tier || 'LOW').toUpperCase()}</span>
-          </td>
-          <td>
-            <span style="font-weight: 600; font-size: 0.85rem;">${rec.recommended_action || 'Inspect'}</span>
-          </td>
-          <td>
-            <span class="labor-tag">⏱ ${rec.estimated_labor_hours || '1.0 - 2.0 hrs'}</span>
-          </td>
-          <td>
-            <div class="load-path-flow">${pathChips}</div>
-            <p class="risk-rationale-text">${rec.rationale || ''}</p>
-          </td>
-        `;
-        riskTbody.appendChild(tr);
-      });
-    }
-  }
-
-  // Phase 5: Populate Documents and Survey Report if present on claim
-  if (result.documents) {
-    renderClaimDocuments(result.documents);
-  }
-  if (result.report) {
-    renderSurveyReport(result.report);
+function toggleRowDrawer(detId) {
+  const drawer = document.getElementById(`drawer_${detId}`);
+  if (drawer) {
+    drawer.style.display = drawer.style.display === "none" ? "table-row" : "none";
   }
 }
 
+// Render Structural Risk Matrix with "Why?" Load Path & Collapsible Explainability
+function renderStructuralRiskMatrix(result) {
+  const riskTbody = document.getElementById("riskMatrixTableBody");
+  if (!riskTbody) return;
+  riskTbody.innerHTML = "";
+
+  const matrix = result.structural_risk_matrix || [];
+  if (matrix.length === 0) {
+    riskTbody.innerHTML = `<tr><td colspan="4" class="text-muted" style="text-align:center; padding: 24px;">No internal structural component risks flagged for this claim.</td></tr>`;
+    return;
+  }
+
+  matrix.forEach((rec, idx) => {
+    const tr = document.createElement("tr");
+    const compName = rec.component_name ? rec.component_name.replace(/_/g, " ").toUpperCase() : "UNKNOWN";
+    const zone = rec.impact_zone || "VEHICLE";
+    const riskPct = Math.round((rec.risk_score || 0) * 100);
+    const tierClass = (rec.priority_tier || "low").toLowerCase();
+    const meterFillClass = riskPct >= 70 ? "risk-high" : riskPct >= 40 ? "risk-med" : "risk-low";
+
+    const pathChips = (rec.load_path || []).map((step, sIdx, arr) => {
+      const isSource = sIdx === 0;
+      const isTarget = sIdx === arr.length - 1;
+      const stepClass = isSource ? 'source' : isTarget ? 'target' : '';
+      const nameClean = step.replace(/_/g, ' ');
+      const arrow = sIdx < arr.length - 1 ? '<span class="load-path-arrow">➔</span>' : '';
+      return `<span class="load-path-step ${stepClass}">${nameClean}</span>${arrow}`;
+    }).join(" ");
+
+    tr.innerHTML = `
+      <td>
+        <strong style="color: #FFF; font-size: 0.9rem;">${compName}</strong>
+        <div style="margin-top: 4px;">
+          <span class="view-badge" style="font-size: 0.68rem;">Zone: ${zone}</span>
+        </div>
+      </td>
+      <td>
+        <div class="risk-meter-wrapper">
+          <div class="risk-meter-header">
+            <span class="risk-score-val">${riskPct}%</span>
+            <span class="badge-risk ${tierClass}">${(rec.priority_tier || 'LOW').toUpperCase()}</span>
+          </div>
+          <div class="risk-meter-bg">
+            <div class="risk-meter-fill ${meterFillClass}" style="width: ${riskPct}%"></div>
+          </div>
+          <span class="text-muted" style="font-size:0.7rem;">Score: ${(rec.risk_score || 0).toFixed(3)}</span>
+        </div>
+      </td>
+      <td>
+        <div style="font-weight: 600; font-size: 0.86rem; color: #F1F5F9;">${rec.recommended_action || 'Inspect'}</div>
+        <div><span class="labor-tag">⏱ ${rec.estimated_labor_hours || '0.5 hrs'}</span></div>
+      </td>
+      <td>
+        <div class="load-path-flow">${pathChips}</div>
+        <button type="button" class="btn-explain-toggle" onclick="toggleExplainDrawer(${idx})">
+          <span>View Explainability</span> ▾
+        </button>
+        <div class="explain-drawer-content" id="explainDrawer_${idx}" style="display: none;">
+          ${rec.rationale || 'Neuro-symbolic force transmission pathway verified.'}
+        </div>
+      </td>
+    `;
+
+    riskTbody.appendChild(tr);
+  });
+}
+
+window.toggleExplainDrawer = function (idx) {
+  const drawer = document.getElementById(`explainDrawer_${idx}`);
+  if (drawer) {
+    drawer.style.display = drawer.style.display === "none" ? "block" : "none";
+  }
+};
 
 // Toggle between segmented mask, depth map, bounding box, and original image
 window.switchImageView = function (idx, mode, url) {
@@ -752,7 +928,10 @@ window.openModal = function (imageUrl, title) {
 
 // Export JSON
 function exportClaimJson() {
-  if (!latestClaimResult) return;
+  if (!latestClaimResult) {
+    alert("No active claim inspection loaded to export.");
+    return;
+  }
   const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(latestClaimResult, null, 2));
   const downloadAnchor = document.createElement("a");
   downloadAnchor.setAttribute("href", dataStr);
@@ -762,35 +941,82 @@ function exportClaimJson() {
   downloadAnchor.remove();
 }
 
-// Stored Claims List
+// Stored Claims List with Search & Status Filtering
 async function loadStoredClaims() {
   const listEl = document.getElementById("claimsList");
   try {
-    const res = await fetch(`${API_BASE}/api/claims?limit=10`);
+    const res = await fetch(`${API_BASE}/api/claims?limit=25`);
     if (!res.ok) throw new Error("Failed to load claims");
     const claims = await res.json();
-
-    if (!claims || claims.length === 0) {
-      listEl.innerHTML = `<p class="text-muted" style="font-size:0.85rem;">No saved claims yet. Run a damage assessment above to populate the repository.</p>`;
-      return;
-    }
-
-    listEl.innerHTML = claims
-      .map(
-        (c) => `
-        <div class="claim-item" onclick="loadSingleClaim('${c.claim_id}')">
-          <div>
-            <span class="claim-item-id">${c.claim_id}</span>
-            <span class="claim-item-meta" style="margin-left: 10px;">${c.images.length} Photos | ${c.damage_summary.total_damages_count} Damages (${c.damage_summary.severity_assessment})</span>
-          </div>
-          <span class="badge-stub-ready">${new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-        </div>
-      `
-      )
-      .join("");
+    allStoredClaims = claims || [];
+    renderStoredClaimsList();
   } catch (err) {
     listEl.innerHTML = `<p class="text-muted" style="font-size:0.85rem;">Error loading claims repository.</p>`;
   }
+}
+
+function renderStoredClaimsList() {
+  const listEl = document.getElementById("claimsList");
+  if (!listEl) return;
+
+  let filtered = allStoredClaims;
+
+  // Search filter
+  if (claimSearchQuery) {
+    filtered = filtered.filter((c) => {
+      const idMatch = (c.claim_id || "").toLowerCase().includes(claimSearchQuery);
+      const regMatch = (c.vehicle_reg_number || "").toLowerCase().includes(claimSearchQuery);
+      return idMatch || regMatch;
+    });
+  }
+
+  // Status pill filter
+  if (activeClaimFilter === "completed") {
+    filtered = filtered.filter((c) => c.status === "COMPLETED" || (c.report && c.report.status === "FINALIZED"));
+  } else if (activeClaimFilter === "review") {
+    filtered = filtered.filter((c) => {
+      const unclass = c.damage_summary?.unclassified_candidates_count || 0;
+      const needsReview = (c.damage_summary?.severity_assessment || "").toLowerCase().includes("severe") || unclass > 0;
+      return needsReview;
+    });
+  } else if (activeClaimFilter === "pending") {
+    filtered = filtered.filter((c) => !c.report || c.report.status === "DRAFT");
+  }
+
+  if (filtered.length === 0) {
+    listEl.innerHTML = `<p class="text-muted" style="font-size:0.85rem; padding: 8px;">No stored claims match current search/filter criteria.</p>`;
+    return;
+  }
+
+  listEl.innerHTML = filtered
+    .map((c) => {
+      const photosCount = c.images?.length || 0;
+      const damagesCount = c.damage_summary?.total_damages_count || 0;
+      const sev = c.damage_summary?.severity_assessment || "Moderate";
+      const sevClass = sev.toLowerCase().includes("minor") ? "minor" : sev.toLowerCase().includes("severe") ? "severe" : "moderate";
+      const isReviewed = c.report && c.report.status === "FINALIZED";
+      const statusPill = isReviewed
+        ? `<span class="status-pill-valid" style="font-size:0.68rem;">Reviewed</span>`
+        : `<span class="badge-stub-ready" style="font-size:0.68rem; background:rgba(37,99,235,0.15); color:#93C5FD;">Active</span>`;
+
+      return `
+        <div class="claim-item" onclick="loadSingleClaim('${c.claim_id}')">
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span class="claim-item-id">${c.claim_id}</span>
+              ${statusPill}
+            </div>
+            <span class="claim-item-meta">
+              Reg: <strong>${c.vehicle_reg_number || 'N/A'}</strong> | ${photosCount} Photos | ${damagesCount} Damages | <span class="badge-risk ${sevClass}" style="padding:1px 5px; font-size:0.65rem;">${sev}</span>
+            </span>
+          </div>
+          <span class="text-muted" style="font-family: var(--font-mono); font-size: 0.74rem;">
+            ${new Date(c.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' })} ${new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        </div>
+      `;
+    })
+    .join("");
 }
 
 window.loadSingleClaim = async function (claimId) {
@@ -799,6 +1025,13 @@ window.loadSingleClaim = async function (claimId) {
     if (!res.ok) throw new Error("Claim not found");
     const claim = await res.json();
     latestClaimResult = claim;
+    claimIdInput.value = claim.claim_id;
+    if (claim.vehicle_reg_number && regNumberInput) {
+      regNumberInput.value = claim.vehicle_reg_number;
+    }
+    if (claim.surveyor_notes && surveyorNotesInput) {
+      surveyorNotesInput.value = claim.surveyor_notes;
+    }
     renderClaimResults(claim);
   } catch (err) {
     alert(`Could not load claim: ${err.message}`);
@@ -806,9 +1039,8 @@ window.loadSingleClaim = async function (claimId) {
 };
 
 /* ==========================================================================
-   Phase 5: Document Intake & KYC Verification Functions
+   Document Intake & KYC Verification Functions
    ========================================================================== */
-
 let activeDocType = "rc_book";
 let activeDocData = {
   rc_book: null,
@@ -945,8 +1177,8 @@ function renderActiveDocFields() {
     const isNeedsReview = currentData.needs_manual_review;
     const latency = currentData.latency_ms ? `${currentData.latency_ms.toFixed(0)}ms` : "";
     const method = currentData.extraction_method === "vision_fallback"
-      ? "👁️ Vision Fallback (<40 chars)"
-      : "📄 PaddleOCR + Llama-3.3-70B";
+      ? "👁️ Vision Fallback"
+      : "📄 PaddleOCR + Groq LLM";
     badgesContainer.innerHTML = `
       <span class="${isNeedsReview ? 'status-pill-review' : 'status-pill-valid'}">
         ${isNeedsReview ? 'Needs Surveyor Review' : 'Verified Valid'}
@@ -1065,9 +1297,8 @@ function renderClaimDocuments(docs) {
 }
 
 /* ==========================================================================
-   Phase 5: AI-Assisted Explainable Survey Report Dossier Functions
+   AI-Assisted Survey Report Dossier Functions
    ========================================================================== */
-
 function initReportSection() {
   const btnGenerateReport = document.getElementById("btnGenerateReport");
   const btnFinalizeReport = document.getElementById("btnFinalizeReport");
@@ -1131,7 +1362,7 @@ async function generateSurveyReportAction() {
     renderSurveyReport(report);
   } catch (err) {
     alert(`Report Generation Error: ${err.message}`);
-    if (emptyPlaceholder && !activeSurveyReport) emptyPlaceholder.style.display = "block";
+    if (emptyPlaceholder && !activeSurveyReport) emptyPlaceholder.style.display = "flex";
   } finally {
     if (spinner) spinner.style.display = "none";
   }
@@ -1159,12 +1390,14 @@ function renderSurveyReport(report) {
   const isFinalized = (report.status === "FINALIZED");
 
   if (statusBadge) {
-    statusBadge.textContent = isFinalized ? "Finalized Assessment" : "AI-Assisted Draft Dossier";
+    statusBadge.textContent = isFinalized ? "Reviewed Dossier" : "AI-Assisted Draft Dossier";
     statusBadge.className = isFinalized ? "badge-finalized-status" : "badge-draft-status";
   }
 
   if (signoffBadge) {
-    signoffBadge.textContent = isFinalized ? `Signed Off (${new Date(report.signed_off_at || Date.now()).toLocaleDateString()})` : "Pending Human Signature";
+    signoffBadge.textContent = isFinalized
+      ? `Reviewed (${new Date(report.signed_off_at || Date.now()).toLocaleDateString()})`
+      : "Pending Review";
     signoffBadge.style.background = isFinalized ? "rgba(16, 185, 129, 0.2)" : "rgba(245, 158, 11, 0.2)";
     signoffBadge.style.color = isFinalized ? "#10B981" : "#F59E0B";
   }
@@ -1205,12 +1438,12 @@ async function finalizeSurveyReportAction() {
       body: JSON.stringify({ signoff_notes: notes }),
     });
 
-    if (!res.ok) throw new Error("Failed to finalize report");
+    if (!res.ok) throw new Error("Failed to save surveyor review");
     const finalizedReport = await res.json();
     renderSurveyReport(finalizedReport);
-    alert("✅ Official Claim Survey Dossier has been signed off and finalized!");
+    alert("✅ Surveyor Review & Remarks saved successfully!");
   } catch (err) {
-    alert(`Could not finalize report: ${err.message}`);
+    alert(`Could not save surveyor review: ${err.message}`);
   }
 }
 
@@ -1247,7 +1480,6 @@ function renderSimpleMarkdown(mdText) {
     if (!inTable || tableRows.length === 0) return;
     let html = "<table>";
     tableRows.forEach((row, rIdx) => {
-      // Skip separator rows like |---|---|
       if (row.every((cell) => cell.replace(/-/g, "").trim() === "")) return;
       const tag = (rIdx === 0) ? "th" : "td";
       html += "<tr>";
@@ -1305,4 +1537,3 @@ function renderSimpleMarkdown(mdText) {
   flushTable();
   return output.join("\n");
 }
-
