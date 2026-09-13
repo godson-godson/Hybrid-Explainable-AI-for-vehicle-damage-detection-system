@@ -48,7 +48,12 @@ from ..pipeline.knowledge_graph import (
     localize_damage_panel,
 )
 from ..pipeline.document_ocr import extract_document_fields, extract_document_hybrid
-from ..pipeline.report_generator import generate_claim_report, generate_survey_report
+from ..pipeline.groq_client import GroqClientError, get_groq_client
+from ..pipeline.report_generator import (
+    ReportGenerationError,
+    generate_claim_report,
+    generate_survey_report,
+)
 import logging
 import time
 
@@ -197,11 +202,18 @@ async def inspect_vehicle_damages(
         # Step A: Detect Vehicle ROI (COCO-pretrained YOLO11n)
         # -------------------------------------------------------------------
         t_crop_start = time.perf_counter()
-        cropped_vehicle, roi_bbox, crop_coords = vehicle_detector.detect_vehicle_roi(
-            image_input=pil_image,
-            margin_pct=default_amg_config.vehicle_crop_margin_pct,
-            min_confidence=0.25,
-        )
+        try:
+            cropped_vehicle, roi_bbox, crop_coords = vehicle_detector.detect_car(
+                image_input=pil_image,
+                margin_pct=default_amg_config.vehicle_crop_margin_pct,
+                min_confidence=0.25,
+            )
+        except ValueError as e:
+            logger.warning("Car detection validation failed for file '%s': %s", file.filename, str(e))
+            raise HTTPException(
+                status_code=400,
+                detail=str(e),
+            )
         vehicle_crop_ms = round((time.perf_counter() - t_crop_start) * 1000.0, 2)
 
         # -------------------------------------------------------------------
@@ -707,7 +719,10 @@ async def update_claim_document_fields(
     status_code=status.HTTP_200_OK,
     summary="Synthesize Explainable Insurance Survey Report using Groq LLM",
 )
-async def generate_claim_survey_report(claim_id: str):
+async def generate_claim_survey_report(
+    claim_id: str,
+    allow_mock: Optional[bool] = Query(None, description="Explicit mock toggle; if None, adopts client default"),
+):
     """
     Final Pipeline Step:
       Synthesizes visual damage detections, SAM2 segmentation metrics,
@@ -726,7 +741,15 @@ async def generate_claim_survey_report(claim_id: str):
     documents = ClaimDocuments(**docs_data) if docs_data else None
 
     # Synthesize report via Groq LLM
-    report = generate_survey_report(claim_data=claim_data, documents=documents)
+    try:
+        mock_flag = allow_mock if allow_mock is not None else get_groq_client().is_mock_mode()
+        report = generate_survey_report(claim_data=claim_data, documents=documents, allow_mock=mock_flag)
+    except (GroqClientError, ReportGenerationError) as e:
+        logger.error(f"[X] Report generation failed for claim '{clean_claim_id}': {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Survey report generation failed: {e}. No fabricated fallback was generated.",
+        )
 
     # Persist in storage repository
     repo.update_claim_report(clean_claim_id, report.model_dump())

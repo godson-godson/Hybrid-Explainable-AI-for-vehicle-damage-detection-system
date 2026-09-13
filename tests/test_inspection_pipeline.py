@@ -339,7 +339,7 @@ def test_report_generator_functional():
         images=[],
         damage_summary=summary,
     )
-    report = generate_claim_report(claim_resp)
+    report = generate_claim_report(claim_resp, allow_mock=True)
     assert report is not None
     assert hasattr(report, "executive_summary")
 
@@ -667,5 +667,55 @@ def test_amg_config_named_values():
     assert default_amg_config.min_deform_scoring_area_pct == 1.0
     assert default_amg_config.vehicle_crop_margin_pct == 0.02
     assert default_amg_config.display_cap_n == 5
+
+
+def test_detect_car_rejects_non_car_image():
+    """Verify detect_car strictly rejects non-car images with ValueError."""
+    from backend.app.vision.vehicle_detector import get_vehicle_detector
+    v_det = get_vehicle_detector()
+
+    # Plain dummy image with no car
+    dummy_img = Image.new("RGB", (300, 200), color=(128, 128, 128))
+    with pytest.raises(ValueError) as exc_info:
+        v_det.detect_car(dummy_img)
+
+    assert "No car detected. This system is strictly configured for passenger car damage assessment." in str(exc_info.value)
+
+
+def test_detect_car_accepts_car_image():
+    """Verify detect_car succeeds on a valid passenger car image."""
+    from backend.app.vision.vehicle_detector import get_vehicle_detector
+    v_det = get_vehicle_detector()
+    sample_path = "backend/static/samples/1.png"
+    if not os.path.exists(sample_path):
+        pytest.skip("Sample image 1.png not found")
+
+    crop_img, roi_bbox, crop_coords = v_det.detect_car(sample_path)
+    assert crop_img is not None
+    assert roi_bbox is not None
+    assert crop_coords[2] > crop_coords[0]
+    assert crop_coords[3] > crop_coords[1]
+    assert roi_bbox.width > 0
+    assert roi_bbox.height > 0
+
+
+def test_inspect_endpoint_rejects_non_car_image():
+    """Verify /claims/{claim_id}/inspect returns 400 when a non-car image is uploaded."""
+    dummy_bytes = _create_dummy_image_bytes()
+    claim_id = "CLM-TEST-NONCAR-REJECT"
+
+    res = client.post(
+        f"/api/claims/{claim_id}/inspect",
+        data={
+            "view_angles": ["front"],
+            "vehicle_reg_number": "KA 01 XX 0000",
+            "confidence_threshold": "0.15",
+        },
+        files=[("files", ("person_or_scenery.jpg", dummy_bytes, "image/jpeg"))],
+    )
+    assert res.status_code == 400
+    err_body = res.json()
+    assert err_body["detail"] == "No car detected. This system is strictly configured for passenger car damage assessment."
+
 
 

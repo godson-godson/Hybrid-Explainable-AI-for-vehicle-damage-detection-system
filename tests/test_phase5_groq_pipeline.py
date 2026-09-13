@@ -34,6 +34,7 @@ from backend.app.pipeline.document_ocr import (
 )
 from backend.app.pipeline.groq_client import GroqClient, get_groq_client
 from backend.app.pipeline.report_generator import (
+    ReportGenerationError,
     _prepare_compact_pipeline_payload,
     generate_survey_report,
 )
@@ -361,7 +362,7 @@ def test_compact_payload_summarization_no_raw_masks():
 # ---------------------------------------------------------------------------
 
 def test_explainable_survey_report_generation():
-    """Verify generated report adheres to Chapter 4.6.5 structure and non-fabrication."""
+    """Verify generated report adheres to Chapter 4.6.5 structure, non-fabrication, and KG preservation."""
     claim = ClaimInspectionResponse(
         claim_id="CLM-VERIFY-001",
         vehicle_reg_number="DL 03 CC 4921",
@@ -387,16 +388,104 @@ def test_explainable_survey_report_generation():
     )
 
     t0 = time.perf_counter()
-    report = generate_survey_report(claim)
+    report = generate_survey_report(claim, allow_mock=True)
     latency_ms = (time.perf_counter() - t0) * 1000
 
     assert report.report_id.startswith("REP-CLM-VERIFY-001")
     assert report.claim_id == "CLM-VERIFY-001"
     assert len(report.executive_summary) > 20
-    assert len(report.internal_inspection_plan) > 0
+    assert len(report.internal_inspection_plan) == 1
+
+    # Issue 3: Ground-truth KG risk matrix exact score & component matching
+    assert report.internal_inspection_plan[0]["risk_score"] == 0.496
+    assert report.internal_inspection_plan[0]["component_name"] == "front longitudinal frame rails"
+    assert report.internal_inspection_plan[0]["priority"] == "MEDIUM"
+
+    # Issue 4: Surveyor recommendation & labor hours, zero hallucinated cost
+    assert report.surveyor_recommendation in (
+        "Detailed Teardown Audit Required",
+        "Physical Verification Recommended",
+        "Cosmetic Survey Verification",
+        "Document Reconciliation Required",
+    )
+    assert "Approve" not in report.surveyor_recommendation
+    assert "Reject" not in report.surveyor_recommendation
+    assert report.total_estimated_labor_hours == 0.5
+    assert report.estimated_repair_cost_min is None
+    assert report.estimated_repair_cost_max is None
+
+    # Issue 2: Markdown dossier assembled deterministically in Python
     assert len(report.markdown_dossier) > 100
     assert "front longitudinal frame rails" in report.markdown_dossier.lower()
+    assert "0.5 hrs" in report.markdown_dossier
+    assert "DL 03 CC 4921" in report.markdown_dossier
+    assert "assistive decision-support tool" in report.markdown_dossier.lower()
     print(f"\n[✓] Survey Report Generation Latency: {latency_ms:.2f}ms (Model: {report.model_used})")
+
+
+def test_report_generator_no_fake_mock_on_error():
+    """Verify that when allow_mock=False, failures raise ReportGenerationError and never return fake demo data."""
+    claim = ClaimInspectionResponse(
+        claim_id="CLM-REAL-9999",
+        vehicle_reg_number="KA 01 AB 1234",
+        status="COMPLETED",
+        images=[],
+        damage_summary=DamageSummary(
+            total_damages_count=1,
+            damage_counts_by_type={"scratch": 1},
+            severity_assessment="Minor",
+        ),
+        structural_risk_matrix=[],
+    )
+
+    # Groq is in mock mode in this test environment; with allow_mock=False it MUST raise ReportGenerationError
+    with pytest.raises(ReportGenerationError) as exc_info:
+        generate_survey_report(claim, allow_mock=False)
+
+    assert "allow_mock=False" in str(exc_info.value) or "Groq" in str(exc_info.value)
+
+
+def test_internal_inspection_plan_ground_truth_retention():
+    """Verify that multiple components from Knowledge Graph are preserved without dropped items or drift."""
+    recs = [
+        InspectionRecommendation(
+            component_name="radiator support assembly",
+            impact_zone="front",
+            risk_score=0.789,
+            safety_risk_level="HIGH",
+            recommended_action="Inspect Upper Mounts",
+            estimated_labor_hours=1.2,
+            load_path=["front bumper", "radiator support"],
+            rationale="Direct frontal load path.",
+        ),
+        InspectionRecommendation(
+            component_name="steering tie rod",
+            impact_zone="front_left",
+            risk_score=0.345,
+            safety_risk_level="LOW",
+            recommended_action="Inspect Joint Boot",
+            estimated_labor_hours=0.6,
+            load_path=["wheel", "steering rack"],
+            rationale="Secondary lateral force.",
+        ),
+    ]
+    claim = ClaimInspectionResponse(
+        claim_id="CLM-KG-TEST",
+        vehicle_reg_number="TN 09 XY 4567",
+        status="COMPLETED",
+        images=[],
+        structural_risk_matrix=recs,
+    )
+
+    report = generate_survey_report(claim, allow_mock=True)
+    assert len(report.internal_inspection_plan) == 2
+    assert report.internal_inspection_plan[0]["component_name"] == "radiator support assembly"
+    assert report.internal_inspection_plan[0]["risk_score"] == 0.789
+    assert report.internal_inspection_plan[0]["priority"] == "HIGH"
+    assert report.internal_inspection_plan[1]["component_name"] == "steering tie rod"
+    assert report.internal_inspection_plan[1]["risk_score"] == 0.345
+    assert report.internal_inspection_plan[1]["priority"] == "LOW"
+    assert report.total_estimated_labor_hours == 1.8
 
 
 # ---------------------------------------------------------------------------
@@ -409,8 +498,10 @@ def test_phase5_api_endpoints_flow():
     test_claim_id = f"CLM-TEST-P5-{int(time.time())}"
 
     # 1. First inspect vehicle images to create base claim
-    synthetic_img = create_synthetic_document_image("Car Damage Photo", ["Dent on front bumper"])
-    files = [("files", ("front.jpg", synthetic_img, "image/jpeg"))]
+    sample_car_path = "backend/static/samples/1.png"
+    with open(sample_car_path, "rb") as f:
+        car_bytes = f.read()
+    files = [("files", ("front.png", car_bytes, "image/png"))]
     resp_inspect = client.post(
         f"/api/claims/{test_claim_id}/inspect",
         files=files,

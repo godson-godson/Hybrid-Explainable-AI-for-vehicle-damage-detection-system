@@ -168,9 +168,8 @@ MOCK_SURVEY_REPORT_JSON = {
         }
     ],
     "explainable_reasoning": "The visual pipeline localized primary damage clusters on the front bumper cover and hood. The neuro-symbolic knowledge graph traversed collision load paths connecting these external panels to internal structural members. Because the bumper reinforcement bar directly shields the front crush cans, the high deformation score (+0.16) on the bumper implies that kinetic forces were transmitted deeper than superficial paint damage. Consequently, teardown and borescope verification of the front longitudinal frame rails is recommended to ensure vehicle roadworthiness before authorization.",
-    "claim_disposition": "Conditional Approval Pending Teardown Inspection",
-    "estimated_repair_cost_min": 28500.0,
-    "estimated_repair_cost_max": 42000.0,
+    "claim_disposition": "Detailed Teardown Audit Required",
+    "surveyor_recommendation": "Detailed Teardown Audit Required",
     "surveyor_action_items": [
         "Perform physical borescope examination of front longitudinal frame rails.",
         "Check radiator support assembly alignment and coolant line tolerances.",
@@ -231,8 +230,8 @@ Depth Anything V2 relative monocular depth calculations demonstrate plastic defo
 
 ### 6. Explainable Reasoning & Surveyor Disposition
 * **Causal Linkage:** Frontal impact forced the bumper cover against the reinforcement bar, propagating stresses to the radiator mounting brackets and crush cans.
-* **Estimated Preliminary Repair Range:** ₹28,500 – ₹42,000 (Parts Replacement & Paint Labor)
-* **Surveyor Recommendation:** **CONDITIONAL APPROVAL PENDING TEARDOWN INSPECTION**
+* **Teardown Inspection Labor Scope:** 1.5 hrs (Concealed Component Borescope & Mount Audit)
+* **Surveyor Audit Recommendation:** **DETAILED TEARDOWN AUDIT REQUIRED**
 * **Action Directive:** Authorize external cosmetic repairs only after garage technician completes borescope verification of the front longitudinal frame rails.
 """
 

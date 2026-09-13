@@ -1,2 +1,35 @@
+# =========================
+# Python cache
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+
+# =========================
+# Virtual environments
+# =========================
+venv/
+.venv/
+env/
+
+# =========================
+# Environment / secrets
+# =========================
+.env
+
+# =========================
+# Model weights
+# =========================
 backend/weights/
-backend/weights/sam2/sam2.1_hiera_tiny.pt
+
+# =========================
+# Generated inspection files
+# =========================
+backend/static/uploads/
+backend/static/annotated/
+
+# =========================
+# Local/source archives
+# =========================
+vehicle_damage_source.zip
+source_files.txt

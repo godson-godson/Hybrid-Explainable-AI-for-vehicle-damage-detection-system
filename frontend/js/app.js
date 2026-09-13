@@ -1402,9 +1402,17 @@ function renderSurveyReport(report) {
     signoffBadge.style.color = isFinalized ? "#10B981" : "#F59E0B";
   }
 
-  if (dispositionEl) dispositionEl.textContent = report.claim_disposition || "Conditional Approval";
+  if (dispositionEl) {
+    dispositionEl.textContent = report.surveyor_recommendation || report.claim_disposition || "Detailed Teardown Audit Required";
+  }
   if (costRangeEl) {
-    costRangeEl.textContent = `₹${(report.estimated_repair_cost_min || 0).toLocaleString()} - ₹${(report.estimated_repair_cost_max || 0).toLocaleString()}`;
+    if (report.total_estimated_labor_hours != null && report.total_estimated_labor_hours > 0) {
+      costRangeEl.textContent = `${report.total_estimated_labor_hours.toFixed(1)} hrs (KG Teardown Scope)`;
+    } else if (report.estimated_repair_cost_min || report.estimated_repair_cost_max) {
+      costRangeEl.textContent = `₹${(report.estimated_repair_cost_min || 0).toLocaleString()} - ₹${(report.estimated_repair_cost_max || 0).toLocaleString()}`;
+    } else {
+      costRangeEl.textContent = "Surveyor Quote Required";
+    }
   }
   if (modelUsedEl) modelUsedEl.textContent = report.model_used || "Groq LLM";
   if (latencyEl) latencyEl.textContent = report.latency_ms ? `${report.latency_ms.toFixed(0)}ms` : "Fast";

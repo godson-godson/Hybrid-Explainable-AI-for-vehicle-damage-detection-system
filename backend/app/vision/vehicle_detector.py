@@ -14,13 +14,13 @@ from ultralytics import YOLO
 
 from ..models.schemas import BoundingBox
 
-# COCO classes representing vehicles:
-# 2: car, 3: motorcycle, 5: bus, 7: truck
-VEHICLE_CLASS_IDS = {2, 3, 5, 7}
+# COCO class representing passenger car:
+CAR_CLASS_ID = 2
+VEHICLE_CLASS_IDS = {CAR_CLASS_ID}
 
 
 class VehicleDetector:
-    """Detects overall vehicle body region in an image using COCO-pretrained YOLO11n."""
+    """Detects passenger car body region in an image using COCO-pretrained YOLO11n."""
 
     def __init__(self, model_path: Optional[str] = None):
         self.model_path = self._resolve_model_path(model_path)
@@ -54,14 +54,15 @@ class VehicleDetector:
         # Fallback to model name which Ultralytics will auto-fetch if needed
         return "yolo11n.pt"
 
-    def detect_vehicle_roi(
+    def detect_car(
         self,
         image_input: Union[Image.Image, np.ndarray, str],
         margin_pct: Optional[float] = None,
         min_confidence: float = 0.25,
     ) -> Tuple[Image.Image, Optional[BoundingBox], Tuple[int, int, int, int]]:
         """
-        Locate the primary vehicle in the image and return a cropped image and its coordinates.
+        Locate the passenger car in the image and return a cropped image and its coordinates.
+        Strictly filters for COCO class 2 (car). Raises ValueError if no car is detected.
 
         Args:
             image_input: PIL Image or path to image.
@@ -70,9 +71,12 @@ class VehicleDetector:
 
         Returns:
             Tuple containing:
-                - Cropped PIL Image around vehicle (or original if no vehicle detected).
-                - BoundingBox of detected vehicle ROI in full image coordinates.
+                - Cropped PIL Image around car.
+                - BoundingBox of detected car ROI in full image coordinates.
                 - Tuple of integer coordinates: (crop_x1, crop_y1, crop_x2, crop_y2).
+
+        Raises:
+            ValueError: If no passenger car is detected.
         """
         if isinstance(image_input, str):
             pil_img = Image.open(image_input).convert("RGB")
@@ -90,42 +94,30 @@ class VehicleDetector:
             results = self.model.predict(
                 source=pil_img,
                 conf=min_confidence,
-                classes=list(VEHICLE_CLASS_IDS),
+                classes=[2],
                 verbose=False,
             )
+
+        # Pipeline Kill Switch: Strictly reject non-car images
+        if not results or len(results) == 0 or results[0].boxes is None or len(results[0].boxes) == 0:
+            raise ValueError("No car detected. This system is strictly configured for passenger car damage assessment.")
 
         best_box = None
         max_area = 0.0
 
-        if results and len(results) > 0 and results[0].boxes is not None:
-            boxes = results[0].boxes
-            for box in boxes:
-                cls_id = int(box.cls[0].item())
-                if cls_id in VEHICLE_CLASS_IDS:
-                    xyxy = box.xyxy[0].tolist()
-                    x1, y1, x2, y2 = xyxy[0], xyxy[1], xyxy[2], xyxy[3]
-                    area = (x2 - x1) * (y2 - y1)
-                    if area > max_area:
-                        max_area = area
-                        best_box = (x1, y1, x2, y2)
+        boxes = results[0].boxes
+        for box in boxes:
+            cls_id = int(box.cls[0].item())
+            if cls_id == 2:
+                xyxy = box.xyxy[0].tolist()
+                x1, y1, x2, y2 = xyxy[0], xyxy[1], xyxy[2], xyxy[3]
+                area = (x2 - x1) * (y2 - y1)
+                if area > max_area:
+                    max_area = area
+                    best_box = (x1, y1, x2, y2)
 
-        # Fallback: if no vehicle was detected (e.g. extreme close-up of a dented door/fender),
-        # treat the entire image as the ROI.
         if best_box is None:
-            crop_coords = (0, 0, img_w, img_h)
-            roi_bbox = BoundingBox(
-                x1=0.0,
-                y1=0.0,
-                x2=float(img_w),
-                y2=float(img_h),
-                width=float(img_w),
-                height=float(img_h),
-                norm_x1=0.0,
-                norm_y1=0.0,
-                norm_x2=1.0,
-                norm_y2=1.0,
-            )
-            return pil_img, roi_bbox, crop_coords
+            raise ValueError("No car detected. This system is strictly configured for passenger car damage assessment.")
 
         # Expand box by margin_pct (tight margin 0.02 avoids background artifacts)
         if margin_pct is None:
@@ -162,6 +154,10 @@ class VehicleDetector:
         )
 
         return cropped_img, roi_bbox, (crop_x1, crop_y1, crop_x2, crop_y2)
+
+    # Alias for backward compatibility
+    detect_vehicle_roi = detect_car
+
 
 
 # Global singleton instance
